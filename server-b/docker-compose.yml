@@ -1,0 +1,138 @@
+version: '3.9'
+
+networks:
+  workers:    # Airflow, Redis, JupyterHub
+    driver: bridge
+  scrapers:   # Isolated — cannot reach workers network
+    driver: bridge
+
+volumes:
+  airflow_logs:
+  airflow_dags:
+  jupyterhub_data:
+  redis_data:
+
+# Shared config for all Airflow services
+# x-airflow-common is a YAML anchor — avoids repeating config
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9-python3.11
+  env_file: .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    # Airflow uses its own DB on Server A via WireGuard
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@10.99.0.1:5433/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+  volumes:
+    - airflow_dags:/opt/airflow/dags
+    - airflow_logs:/opt/airflow/logs
+  networks:
+    - workers
+  restart: unless-stopped
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+
+  # ── WIREGUARD ─────────────────────────────────────────────────────────
+  # Encrypted tunnel to Server A.
+  # All cross-server traffic goes through here.
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    volumes:
+      - ./wireguard:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - '51820:51820/udp'
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
+  # ── REDIS ─────────────────────────────────────────────────────────────
+  # Task queue broker for Celery and Airflow.
+  # Bound to WireGuard IP only — not reachable from public internet.
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - workers
+    ports:
+      - '10.99.0.2:6379:6379'
+    command: redis-server --appendonly yes --maxmemory 256mb
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── AIRFLOW WEBSERVER ──────────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - '8080:8080'
+
+  # ── AIRFLOW SCHEDULER ──────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+
+  # ── AIRFLOW WORKER ─────────────────────────────────────────────────────
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    command: celery worker
+
+  # ── AIRFLOW INIT ───────────────────────────────────────────────────────
+  # Runs DB migrations and creates admin user.
+  # Runs once then exits. Safe to re-run.
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    command: >
+      bash -c "airflow db upgrade &&
+      airflow users create
+      --username admin
+      --firstname Admin
+      --lastname User
+      --role Admin
+      --email admin@yourdomain.com
+      --password ${AIRFLOW_ADMIN_PASSWORD}"
+    restart: 'no'
+
+  # ── JUPYTERHUB ─────────────────────────────────────────────────────────
+  jupyterhub:
+    image: jupyterhub/jupyterhub:4
+    container_name: jupyterhub
+    restart: unless-stopped
+    volumes:
+      - jupyterhub_data:/srv/jupyterhub
+      - ./jupyterhub/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro
+    ports:
+      - '8888:8000'
+    networks:
+      - workers
+
+  # ── SCRAPERS ───────────────────────────────────────────────────────────
+  # Isolated on their own network.
+  # Cannot reach Airflow, Redis, or WireGuard.
+  # Writes output to S3 only.
+  scraper:
+    image: ${REGISTRY}/scraper:${VERSION:-latest}
+    container_name: scraper
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - scrapers

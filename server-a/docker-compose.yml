@@ -1,0 +1,134 @@
+version: '3.9'
+
+# Two private networks — containers only see what they need to
+networks:
+  frontend:   # Nginx <-> Django only
+    driver: bridge
+  backend:    # Django <-> Postgres, Neo4j, Gotenberg
+    driver: bridge
+
+# Named volumes persist data even if containers are recreated
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+
+services:
+
+  # ── NGINX ─────────────────────────────────────────────────────────────
+  # Only container exposed to the internet (via ALB).
+  # ALB terminates SSL and forwards plain HTTP on port 80.
+  # Nginx proxies to Django on port 8000.
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - frontend
+    depends_on:
+      - backend
+
+  # ── DJANGO ────────────────────────────────────────────────────────────
+  # Your application. Runs Gunicorn with 4 worker processes.
+  # On both networks: receives from Nginx, talks to databases.
+  backend:
+    image: ${REGISTRY}/backend:${VERSION:-latest}
+    container_name: backend
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      gunicorn backend.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers 4
+      --timeout 120
+      --access-logfile -
+      --error-logfile -
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.5'
+
+  # ── CELERY ────────────────────────────────────────────────────────────
+  # Runs background tasks from the Redis queue on Server B.
+  # Same image as Django — different command.
+  celery:
+    image: ${REGISTRY}/backend:${VERSION:-latest}
+    container_name: celery
+    restart: unless-stopped
+    env_file: .env
+    command: celery -A backend worker --loglevel=info --concurrency=4
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── POSTGRES ──────────────────────────────────────────────────────────
+  # Relational database. No ports exposed — only reachable
+  # inside the backend Docker network by container name.
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-appdb}
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-appuser}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── NEO4J ─────────────────────────────────────────────────────────────
+  # Graph database. No ports exposed — only reachable
+  # inside the backend Docker network.
+  neo4j:
+    image: neo4j:5-community
+    container_name: neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_pagecache_size: 512M
+      NEO4J_dbms_memory_heap_max__size: 512M
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:7474']
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── GOTENBERG ─────────────────────────────────────────────────────────
+  # PDF converter. Internal only.
+  # Django calls it at http://gotenberg:3000
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: gotenberg
+    restart: unless-stopped
+    networks:
+      - backend

@@ -1,0 +1,18 @@
+# Never commit secrets
+.env
+server-a/.env
+server-b/.env
+
+# Never commit private keys
+*.pem
+server-a/wireguard/privatekey
+server-b/wireguard/privatekey
+
+# Never commit zip files or dumps
+*.zip
+*.dump
+*.dump.gz
+
+# OS files
+.DS_Store
+Thumbs.db
