@@ -13,7 +13,7 @@ sudo apt-get install -y -qq \
 
 # AWS CLI v2 — not in Ubuntu 24.04 apt repo
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
-unzip /tmp/awscliv2.zip -d /tmp/
+unzip -o /tmp/awscliv2.zip -d /tmp/
 sudo /tmp/aws/install --update || true # --update flag is idempotent, but doesn't work on first install for some reason
 rm -rf /tmp/awscliv2.zip /tmp/aws
 
