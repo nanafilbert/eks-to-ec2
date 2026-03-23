@@ -11,10 +11,6 @@ sudo apt-get install -y -qq \
   ufw ca-certificates gnupg \
   jq wireguard-tools
 
-# fail2ban
-sudo apt-get install -y -qq fail2ban || log "fail2ban not available, skipping"
-
-
 # AWS CLI v2 — not in Ubuntu 24.04 apt repo
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
 unzip -o /tmp/awscliv2.zip -d /tmp/
