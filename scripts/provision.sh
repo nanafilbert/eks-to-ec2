@@ -6,6 +6,8 @@ log() { echo "[provision] $*"; }
 
 log "Updating packages..."
 export DEBIAN_FRONTEND=noninteractive
+sudo apt-get update -qq
+sudo apt-get upgrade -y -qq
 sudo apt-get install -y -qq \
   curl wget git unzip htop vim \
   ufw ca-certificates gnupg \
