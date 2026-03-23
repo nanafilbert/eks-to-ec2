@@ -67,6 +67,11 @@ cat <<'DAEMON' | sudo tee /etc/docker/daemon.json
 DAEMON
 sudo systemctl restart docker
 
+# ── SSM Agent ─────────────────────────────────────────────────────────
+log "Configuring SSM agent..."
+sudo systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
+sudo systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
+
 # ── fail2ban ──────────────────────────────────────────────────────────
 sudo systemctl enable fail2ban
 sudo systemctl start fail2ban
