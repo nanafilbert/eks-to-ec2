@@ -8,7 +8,7 @@ log "Updating packages..."
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get install -y -qq \
   curl wget git unzip htop vim \
-  ufw fail2ban ca-certificates gnupg \
+  ufw ca-certificates gnupg \
   jq wireguard-tools
 
 # fail2ban
@@ -77,7 +77,10 @@ sudo systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
 sudo systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
 
 # ── fail2ban ──────────────────────────────────────────────────────────
-sudo systemctl enable fail2ban
-sudo systemctl start fail2ban
+sudo apt-get install -y -qq fail2ban || log "fail2ban not available, skipping"
+if command -v fail2ban-server &>/dev/null; then
+  sudo systemctl enable fail2ban
+  sudo systemctl start fail2ban
+fi
 
 log "Done. Log out and back in for Docker group to take effect."
