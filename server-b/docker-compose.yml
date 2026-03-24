@@ -14,7 +14,7 @@ volumes:
 # Shared config for all Airflow services
 # x-airflow-common is a YAML anchor — avoids repeating config
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.9-python3.11
+  image: apache/airflow:2.10.5-python3.11
   env_file: .env
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
