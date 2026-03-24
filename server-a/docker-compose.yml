@@ -1,4 +1,3 @@
-version: '3.9'
 
 # Two private networks — containers only see what they need to
 networks:
@@ -29,8 +28,8 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
     networks:
       - frontend
-    depends_on:
-      - backend
+    #depends_on:
+    #  - backend
 
   # ── DJANGO ────────────────────────────────────────────────────────────
   # Your application. Runs Gunicorn with 4 worker processes.
